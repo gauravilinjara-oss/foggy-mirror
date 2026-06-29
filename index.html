@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Fog Mirror</title>
+<style>
+  :root{ --accent:#bfe3df; --ink:#e4eef0; --hint:#9fb8bc; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#05080a}
+  body{ font-family:"Avenir Next","Segoe UI",system-ui,sans-serif; -webkit-font-smoothing:antialiased; color:var(--ink); }
+
+  #video,#fog{ position:fixed; inset:0; width:100vw; height:100vh; }
+  #video{ object-fit:cover; transform:scaleX(-1); background:#05080a; }
+  #fog{ touch-action:none; }
+  .vignette{ position:fixed; inset:0; pointer-events:none; z-index:2; box-shadow:inset 0 0 220px 40px rgba(5,8,10,.5); }
+  .tag{ position:fixed; top:16px; left:18px; z-index:4; font-size:11px; letter-spacing:.6px; color:rgba(159,184,188,.45); pointer-events:none;}
+  .hud{ position:fixed; top:14px; right:16px; z-index:4; font-size:11px; letter-spacing:.4px; color:rgba(159,184,188,.6);
+    background:rgba(14,20,22,.5); border:1px solid rgba(125,154,160,.18); border-radius:8px; padding:6px 11px;
+    pointer-events:none; backdrop-filter:blur(6px); opacity:0; transition:opacity .4s ease;}
+  .hud.show{opacity:1} .hud b{ color:var(--accent); font-weight:600;}
+
+  .breathe{ position:fixed; left:50%; top:40%; transform:translate(-50%,-50%); z-index:3; pointer-events:none;
+    font-style:italic; letter-spacing:1px; font-size:clamp(16px,2.2vw,22px); color:rgba(228,238,240,0);
+    text-shadow:0 1px 18px rgba(0,0,0,.55); transition:color 1s ease; text-align:center;}
+  .breathe.show{ color:rgba(228,238,240,.7); }
+
+  .pen{ position:fixed; z-index:3; width:14px; height:14px; border-radius:50%; pointer-events:none; transform:translate(-50%,-50%);
+    border:1.5px solid rgba(191,227,223,.5); box-shadow:0 0 22px rgba(191,227,223,.2); opacity:0; transition:opacity .2s ease, background .12s ease; }
+  .pen.show{ opacity:1; }
+  .pen.down{ background:rgba(191,227,223,.32); border-color:rgba(191,227,223,.9); box-shadow:0 0 26px rgba(191,227,223,.5); }
+
+  .meter{ position:fixed; left:24px; right:24px; bottom:96px; z-index:4; height:3px; border-radius:3px;
+    background:rgba(255,255,255,.08); overflow:hidden; opacity:0; transition:opacity .4s ease;}
+  .meter.show{opacity:1}
+  .meter span{ display:block; height:100%; width:0%; background:linear-gradient(90deg, rgba(191,227,223,.4), var(--accent)); transition:width .08s linear;}
+
+  .gate{ position:fixed; inset:0; z-index:6; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:18px; text-align:center; padding:30px; background:radial-gradient(120% 90% at 50% 40%, rgba(20,29,32,.78), rgba(7,11,13,.95)); transition:opacity .6s ease;}
+  .gate h1{ font-weight:500; font-size:clamp(24px,4vw,40px); letter-spacing:.5px;}
+  .gate p{ color:var(--hint); max-width:48ch; line-height:1.6; font-size:15px;}
+  .start{ margin-top:6px; font:inherit; font-size:15px; letter-spacing:.4px; color:#0e1416; background:var(--accent);
+    border:none; border-radius:999px; padding:13px 30px; cursor:pointer; box-shadow:0 8px 30px -8px rgba(191,227,223,.5); transition:transform .15s, box-shadow .15s;}
+  .start:hover{ transform:translateY(-1px);} .start:disabled{ opacity:.6; cursor:default; }
+  .gateNote{ font-size:12.5px; min-height:1.2em; } .err{ color:#e9a3a3; line-height:1.5; max-width:48ch; }
+
+  .controls{ position:fixed; left:50%; bottom:20px; transform:translate(-50%,8px); z-index:5; display:flex; flex-wrap:wrap;
+    gap:12px 20px; align-items:center; justify-content:center; padding:12px 18px; background:rgba(14,20,22,.55);
+    border:1px solid rgba(125,154,160,.16); border-radius:14px; backdrop-filter:blur(8px); opacity:0; transition:.45s ease; max-width:94vw;}
+  .controls.show{ opacity:1; transform:translateX(-50%); } .controls:hover{ background:rgba(14,20,22,.78); }
+  .ctl{ display:flex; align-items:center; gap:9px; }
+  .ctl label{ letter-spacing:.4px; text-transform:uppercase; font-size:10px; color:var(--hint);}
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:88px; height:3px; background:rgba(255,255,255,.16); border-radius:3px; outline:none;}
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:var(--accent); cursor:pointer; box-shadow:0 0 0 4px rgba(191,227,223,.12);}
+  input[type=range]::-moz-range-thumb{ width:13px;height:13px;border:none;border-radius:50%;background:var(--accent);cursor:pointer;}
+  .btn{ font:inherit; font-size:12.5px; color:var(--ink); background:rgba(255,255,255,.05); border:1px solid rgba(125,154,160,.2); border-radius:8px; padding:8px 14px; cursor:pointer; transition:.15s;}
+  .btn:hover{ background:rgba(255,255,255,.1); border-color:rgba(191,227,223,.4); }
+</style>
+</head>
+<body>
+  <video id="video" playsinline muted></video>
+  <canvas id="fog"></canvas>
+  <div class="vignette"></div>
+  <div class="tag">camera + microphone · all on-device</div>
+  <div class="hud" id="hud"></div>
+  <div class="breathe" id="breathe"></div>
+  <div class="pen" id="pen"></div>
+  <div class="meter" id="meter"><span id="meterFill"></span></div>
+
+  <div class="controls" id="controls">
+    <div class="ctl"><label>Blow</label><input type="range" id="blowSens" min="1" max="100" value="38"></div>
+    <div class="ctl"><label>Re-fog</label><input type="range" id="refog" min="0" max="100" value="6"></div>
+    <div class="ctl"><label>Brush</label><input type="range" id="brush" min="4" max="44" value="16"></div>
+    <div class="ctl"><label>Smooth</label><input type="range" id="smooth" min="0" max="100" value="65"></div>
+    <button class="btn" id="fogBtn">Fog it up</button>
+    <button class="btn" id="clearBtn">Wipe clean</button>
+  </div>
+
+  <div class="gate" id="gate">
+    <h1>Fog Mirror</h1>
+    <p>The glass is misted. <b>Pinch your thumb and index finger</b> and move to write. <b>Make a fist</b> to wipe the glass clear. <b>Hold up two fingers</b> to mist it back up. An open, relaxed hand does nothing — so you can move freely. The readout in the top-right shows what the camera sees. (Mouse works too — just drag.)</p>
+    <button class="start" id="startBtn">Step up to the mirror</button>
+    <div class="gateNote" id="gateNote"></div>
+  </div>
+
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18";
+
+const video=document.getElementById('video');
+const fog=document.getElementById('fog'); const fctx=fog.getContext('2d');
+const mask=document.createElement('canvas'); const mctx=mask.getContext('2d');
+const refl=document.createElement('canvas'); const rctx=refl.getContext('2d');   // low-res mirrored video -> soft fogged reflection
+// static condensation grain so the mist isn't a dead-flat wash
+const noise=document.createElement('canvas'); noise.width=noise.height=180;
+{ const nx=noise.getContext('2d'); const img=nx.createImageData(180,180);
+  for(let i=0;i<img.data.length;i+=4){ const v=205+Math.random()*50; img.data[i]=img.data[i+1]=img.data[i+2]=v; img.data[i+3]=Math.random()*26; }
+  nx.putImageData(img,0,0); }
+let noisePat=null;
+const gate=document.getElementById('gate'), gateNote=document.getElementById('gateNote');
+const startBtn=document.getElementById('startBtn'), controls=document.getElementById('controls');
+const breathe=document.getElementById('breathe'), meter=document.getElementById('meter'), meterFill=document.getElementById('meterFill');
+const blowSens=document.getElementById('blowSens'), refog=document.getElementById('refog'), brush=document.getElementById('brush'), smoothEl=document.getElementById('smooth');
+const fogBtn=document.getElementById('fogBtn'), clearBtn=document.getElementById('clearBtn');
+const pen=document.getElementById('pen'), hud=document.getElementById('hud');
+// pinch thresholds (thumb–index gap as a fraction of palm width): engage below ON, release above OFF
+const PINCH_ON=0.30, PINCH_OFF=0.50;
+
+const FOG='rgba(232,240,243,';
+const BASE=0.5;                 // resting mist density
+let fogDensity=BASE;
+let analyser=null,audioData=null,smoothedBreath=0;
+let handLandmarker=null,lastVideoTime=-1,running=false,everWrote=false,lastTs=0,lastRes=null;
+
+// One Euro filter — low jitter when slow, low lag when fast.
+class OneEuro{
+  constructor(minCutoff=1.0,beta=0.015,dcutoff=1.0){ this.mc=minCutoff;this.beta=beta;this.dc=dcutoff;this.x=null;this.dx=0;this.t=null; }
+  a(c,dt){ const tau=1/(2*Math.PI*c); return 1/(1+tau/dt); }
+  f(v,t){ if(this.x===null){this.x=v;this.t=t;return v;}
+    const dt=Math.max(1e-3,(t-this.t)/1000); this.t=t;
+    const dv=(v-this.x)/dt, ad=this.a(this.dc,dt), dvH=ad*dv+(1-ad)*this.dx;
+    const c=this.mc+this.beta*Math.abs(dvH), al=this.a(c,dt), vH=al*v+(1-al)*this.x;
+    this.x=vH; this.dx=dvH; return vH; }
+}
+// Light de-jitter on the raw fingertip. The Smooth slider drives the per-frame easing (below),
+// which is what actually makes the line glide between the slower hand-detection updates.
+function makeEuro(){ return new OneEuro(1.0, 0.008); }
+
+// per-hand pen state — each detected hand writes independently
+const pens={};
+
+// Point your index finger to write; lower it / open the hand to lift the pen.
+
+function sizeCanvas(){ const W=window.innerWidth,H=window.innerHeight; fog.width=W;fog.height=H; mask.width=W;mask.height=H;
+  refl.width=Math.max(1,Math.round(W/3)); refl.height=Math.max(1,Math.round(H/3)); noisePat=null; }
+// draw the camera, mirrored + object-fit:cover, into any target context
+function drawVideoCover(ctx,W,H){ const vw=video.videoWidth,vh=video.videoHeight; if(!vw||!vh) return false;
+  const s=Math.max(W/vw,H/vh), dw=vw*s, dh=vh*s, dx=(W-dw)/2, dy=(H-dh)/2;
+  ctx.save(); ctx.translate(W,0); ctx.scale(-1,1); ctx.drawImage(video,dx,dy,dw,dh); ctx.restore(); return true; }
+function resetMist(){ sizeCanvas(); mctx.clearRect(0,0,mask.width,mask.height); fogDensity=BASE; }
+window.addEventListener('resize',()=>{ if(running) resetMist(); });
+
+// strokes are drawn onto the opaque mask (uniform, no overlap-darkening)
+function maskDot(x,y,r){ mctx.globalCompositeOperation='source-over'; mctx.fillStyle='#fff';
+  mctx.beginPath(); mctx.arc(x,y,r,0,Math.PI*2); mctx.fill(); }
+function maskCurve(from,ctrl,to,w){ mctx.globalCompositeOperation='source-over'; mctx.strokeStyle='#fff';
+  mctx.lineCap='round'; mctx.lineJoin='round'; mctx.lineWidth=w;
+  mctx.beginPath(); mctx.moveTo(from[0],from[1]); mctx.quadraticCurveTo(ctrl[0],ctrl[1],to[0],to[1]); mctx.stroke(); }
+
+function mapPoint(nx,ny){
+  const vw=video.videoWidth,vh=video.videoHeight,W=fog.width,H=fog.height;
+  const s=Math.max(W/vw,H/vh), offX=(vw*s-W)/2, offY=(vh*s-H)/2;
+  return [W-(nx*vw*s-offX), ny*vh*s-offY];
+}
+
+function readBreath(){ if(!analyser) return 0; analyser.getByteFrequencyData(audioData);
+  const n=Math.floor(audioData.length/6); let s=0; for(let i=2;i<n;i++) s+=audioData[i];
+  const avg=s/(n-2), sens=+blowSens.value/100; return Math.min(1,(avg/255)/(1.05-sens)); }
+
+async function start(){
+  startBtn.disabled=true; gateNote.textContent='Asking for camera + microphone…';
+  let stream;
+  try{ stream=await navigator.mediaDevices.getUserMedia({ video:{facingMode:'user',width:{ideal:1280},height:{ideal:960}},
+        audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false} }); }
+  catch(e){ try{ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
+      gateNote.innerHTML="<span class='err'>No mic — blow detection off, but writing still works.</span>"; }
+    catch(e2){ gateNote.innerHTML="<span class='err'>Couldn't reach the camera. Open this file in its own browser tab and allow camera + mic.</span>"; startBtn.disabled=false; return; } }
+  video.srcObject=stream; await video.play();
+
+  const at=stream.getAudioTracks()[0];
+  if(at){ try{ const AC=window.AudioContext||window.webkitAudioContext; const ac=new AC();
+    if(ac.state==='suspended') await ac.resume();
+    const src=ac.createMediaStreamSource(stream); analyser=ac.createAnalyser();
+    analyser.fftSize=1024; analyser.smoothingTimeConstant=.6; src.connect(analyser); audioData=new Uint8Array(analyser.frequencyBinCount);
+  }catch(e){ analyser=null; } }
+
+  gateNote.textContent='Waking up hand tracking…';
+  try{
+    const vision=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm");
+    const opts={ baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate:"GPU" }, runningMode:"VIDEO", numHands:1 };
+    try{ handLandmarker=await HandLandmarker.createFromOptions(vision,opts); }
+    catch(e){ opts.baseOptions.delegate="CPU"; handLandmarker=await HandLandmarker.createFromOptions(vision,opts); }
+  }catch(e){ handLandmarker=null; gateNote.innerHTML="<span class='err'>Hand tracking didn't load (needs internet). You can still write with the mouse / touch.</span>"; }
+
+  running=true; resetMist();
+  gate.style.opacity=0; setTimeout(()=>gate.remove(),650);
+  controls.classList.add('show'); meter.classList.add('show'); hud.classList.add('show');
+  breathe.textContent = handLandmarker ? 'pinch = write · fist = erase · two fingers = fog' : 'drag to write';
+  breathe.classList.add('show');
+  requestAnimationFrame(loop);
+}
+
+function loop(){
+  if(!running) return;
+
+  // breath -> fog density (with slow drift back to baseline so it never locks opaque)
+  smoothedBreath = smoothedBreath*0.85 + readBreath()*0.15;   // a touch calmer than before
+  meterFill.style.width=(smoothedBreath*100).toFixed(0)+'%';
+  if(smoothedBreath>0.24) fogDensity=Math.min(0.92, fogDensity+0.010);   // needs a real blow, not ambient noise
+  fogDensity += (BASE-fogDensity)*0.0015;
+
+  // re-fog: fade the wipe mask so writing slowly mists back over
+  const re=+refog.value/100;
+  if(re>0){ mctx.globalCompositeOperation='destination-out'; mctx.fillStyle='rgba(0,0,0,'+(re*0.012)+')';
+    mctx.fillRect(0,0,mask.width,mask.height); mctx.globalCompositeOperation='source-over'; }
+
+  // ---- hand gestures --------------------------------------------------------
+  //   PINCH (thumb+index)  -> WRITE  (thin line at the pinch point)
+  //   OPEN hand (3+ up)    -> WIPE   (clear a wide patch under the palm)
+  //   TWO fingers up       -> FOG    (mist the glass back up)
+  //   anything else        -> idle   (just a hover dot; nothing happens)
+  let penShown=false, handSeen=false, hudMode='idle', fogging=false, hudRatio=null;
+  if(handLandmarker){
+    const now=performance.now(); const ts = now>lastTs? now : lastTs+1; lastTs=ts;
+    if(video.currentTime!==lastVideoTime){           // only run the detector on a fresh camera frame
+      lastVideoTime=video.currentTime;
+      try{ lastRes=handLandmarker.detectForVideo(video, ts); }catch(e){}
+    }
+    const res=lastRes, seen={};
+    if(res && res.landmarks && res.landmarks.length){
+      handSeen=true; const t=performance.now();
+      for(let h=0;h<res.landmarks.length;h++){
+        const lm=res.landmarks[h], label='h'+h; seen[label]=true;
+        let st=pens[label]; if(!st){ st=pens[label]={fx:null,fy:null,last:null,mid:null,cur:null,target:null,ghost:null,radius:20,mode:'idle',c:0}; }
+        // a finger is "up" when its tip is farther from the wrist than its middle knuckle
+        const ext=(tip,pip)=>Math.hypot(lm[tip].x-lm[0].x,lm[tip].y-lm[0].y) > Math.hypot(lm[pip].x-lm[0].x,lm[pip].y-lm[0].y)*1.06;
+        const idx=ext(8,6), mid=ext(12,10), rng=ext(16,14), pky=ext(20,18);
+        const up=(idx?1:0)+(mid?1:0)+(rng?1:0)+(pky?1:0);
+        // PINCH = thumb-tip↔index-tip gap measured RELATIVE TO PALM WIDTH (knuckle 5 ↔ 17), in 3D.
+        // Using a ratio (not absolute metres) makes it scale-proof; using 3D world coords makes it
+        // rotation-proof. A genuine touch is a small fraction of palm width; relaxed fingers are not.
+        const dist=(p,q)=>Math.hypot(p.x-q.x, p.y-q.y, (p.z||0)-(q.z||0));
+        let ratio;
+        const wl = res.worldLandmarks && res.worldLandmarks[h];
+        if(wl){ ratio = dist(wl[4],wl[8]) / (dist(wl[5],wl[17])||1e-6); }
+        else { const P=i=>{ const m=mapPoint(lm[i].x,lm[i].y); return {x:m[0],y:m[1]}; };
+          ratio = dist(P(4),P(8)) / (dist(P(5),P(17))||1); }
+        const pinch = ratio < (st.mode==='write'?PINCH_OFF:PINCH_ON);   // gap vs palm width; hysteresis between ON/OFF
+        // index is "straight" when its tip reaches past its own knuckle — true in a pinch, false in a fist.
+        // This stops a fist (thumb resting near the index) from being misread as a writing pinch.
+        const idxStraight = Math.hypot(lm[8].x-lm[0].x,lm[8].y-lm[0].y) > Math.hypot(lm[5].x-lm[0].x,lm[5].y-lm[0].y)*1.05;
+        // A real FIST = every fingertip curled IN past its own knuckle (tip closer to the wrist than its MCP).
+        // This is far stricter than "no fingers extended", so a relaxed / half-open / moving hand won't erase.
+        const curl=(tip,mcp)=>Math.hypot(lm[tip].x-lm[0].x,lm[tip].y-lm[0].y) < Math.hypot(lm[mcp].x-lm[0].x,lm[mcp].y-lm[0].y)*0.92;
+        const fist = curl(8,5) && curl(12,9) && curl(16,13) && curl(20,17);
+        hudRatio=ratio;
+        const want =
+            (st.mode==='write' && pinch) ? 'write'                     // never interrupt a stroke while still pinched
+          : (pinch && idxStraight)       ? 'write'                     // begin writing on a clear thumb+index pinch
+          : (fist && !pinch)             ? 'wipe'                      // erase ONLY when clearly NOT pinching (deliberate fist)
+          : (up===2 && idx && mid)       ? 'fog' : 'idle';             // two fingers = fog; open/relaxed hand = neutral
+        // pinch follows instantly; the FIST must be held a few frames so a passing clench never erases
+        const need = (want==='wipe' && st.mode!=='wipe') ? 5 : 2;
+        if(want===st.mode){ st.c=0; }
+        else if(++st.c>=need){ st.mode=want; st.c=0; st.fx=makeEuro(); st.fy=makeEuro(); st.cur=null; st.target=null; st.last=null; st.mid=null; }
+        hudMode=st.mode;
+        if(st.mode==='write'){
+          const [rx,ry]=mapPoint(lm[8].x,lm[8].y);                            // index FINGERTIP = pen tip (where you point)
+          st.ghost=[rx,ry]; st.target=[st.fx.f(rx,t),st.fy.f(ry,t)]; st.radius=+brush.value;
+        } else if(st.mode==='wipe'){
+          const ids=[0,5,9,13,17]; let cx=0,cy=0; for(const i of ids){ cx+=lm[i].x; cy+=lm[i].y; } cx/=5; cy/=5;
+          const [rx,ry]=mapPoint(cx,cy);                                       // palm centre
+          const a=mapPoint(lm[5].x,lm[5].y), b=mapPoint(lm[17].x,lm[17].y);
+          st.ghost=[rx,ry]; st.target=[st.fx.f(rx,t),st.fy.f(ry,t)]; st.radius=Math.max(80, Math.hypot(a[0]-b[0],a[1]-b[1])*2.2);
+        } else {                                                              // fog / idle: don't carve
+          const [rx,ry]=mapPoint(lm[8].x,lm[8].y); st.ghost=[rx,ry]; st.target=null;
+          if(st.mode==='fog') fogging=true;
+        }
+      }
+    }
+    for(const k in pens){ if(!seen[k]) delete pens[k]; }   // hand left the frame -> stop
+  }
+
+  // two-finger FOG gesture: mist the glass back up + slowly re-cover any cleared strokes
+  if(fogging){ fogDensity=Math.min(0.95, fogDensity+0.02);
+    mctx.globalCompositeOperation='destination-out'; mctx.fillStyle='rgba(0,0,0,0.05)';
+    mctx.fillRect(0,0,mask.width,mask.height); mctx.globalCompositeOperation='source-over'; }
+
+  // per-frame stroke: glide toward the latest target every frame (~60fps) so the cleared line
+  // stays dense and smooth between the slower hand detections. Smooth slider sets the step size.
+  { const s=+smoothEl.value/100, ease=0.42-0.34*s, JUMP=Math.max(fog.width,fog.height)*0.22;
+    for(const k in pens){ const st=pens[k];
+      if(st.target){ const w=st.radius||20;
+        // teleport guard: if the target leaps (tracking glitch / pen just engaged), replant without a streak
+        if(!st.cur || Math.hypot(st.target[0]-st.cur[0],st.target[1]-st.cur[1])>JUMP){
+          st.cur=st.target.slice(); st.last=st.cur.slice(); st.mid=st.cur.slice(); maskDot(st.cur[0],st.cur[1],w*0.5);
+        } else { st.cur[0]+=(st.target[0]-st.cur[0])*ease; st.cur[1]+=(st.target[1]-st.cur[1])*ease;
+          const m=[(st.last[0]+st.cur[0])/2,(st.last[1]+st.cur[1])/2];
+          maskCurve(st.mid,st.last,m,w); st.mid=m; st.last=[st.cur[0],st.cur[1]]; }
+        showPen(st.cur[0],st.cur[1],w,true); penShown=true;
+        if(!everWrote){ everWrote=true; setTimeout(()=>breathe.classList.remove('show'),1600); }
+      } else if(st.ghost && !penShown){ showPen(st.ghost[0],st.ghost[1],16,false); penShown=true; }
+    }
+  }
+  if(!penShown && !pDown) pen.classList.remove('show');
+
+  // live status so you can see exactly what the camera is reading
+  hud.innerHTML = !handLandmarker ? 'hand tracking off · use the mouse'
+    : !handSeen ? 'show your hand to the camera…'
+    : '<b>'+(hudMode==='write'?'WRITE':hudMode==='wipe'?'ERASE':hudMode==='fog'?'FOG':'READY')+'</b>'
+      +(hudRatio!=null?' &nbsp; pinch '+hudRatio.toFixed(2):'')+' &nbsp;·&nbsp; pinch = write · fist = erase · two fingers = fog';
+
+  // composite a real fogged-glass look:
+  //  • fogged area  = blurred, bright, desaturated reflection + condensation wash + grain
+  //  • wiped streak = carved away to reveal the SHARP mirror (the <video> below) — clear glass
+  const W=fog.width,H=fog.height;
+  // mirrored camera at 1/3 res -> naturally soft when scaled up (cheap, dreamy blur)
+  rctx.setTransform(1,0,0,1,0,0); rctx.clearRect(0,0,refl.width,refl.height);
+  drawVideoCover(rctx,refl.width,refl.height);
+
+  fctx.globalCompositeOperation='source-over'; fctx.clearRect(0,0,W,H);
+  fctx.filter='blur(4px) brightness(1.1) saturate(.55)';   // can't see clearly through fog
+  fctx.drawImage(refl,0,0,W,H);
+  fctx.filter='none';
+  fctx.fillStyle=FOG+fogDensity+')'; fctx.fillRect(0,0,W,H);                 // condensation wash (breath-driven)
+  if(!noisePat) noisePat=fctx.createPattern(noise,'repeat');
+  fctx.globalAlpha=0.55*fogDensity; fctx.fillStyle=noisePat; fctx.fillRect(0,0,W,H); fctx.globalAlpha=1;  // uneven grain
+  fctx.globalCompositeOperation='destination-out';
+  fctx.filter='blur(2px)';                 // soft wet edge on the wipe
+  fctx.drawImage(mask,0,0);
+  fctx.filter='none';
+  fctx.globalCompositeOperation='source-over';
+
+  requestAnimationFrame(loop);
+}
+
+function showPen(x,y,diam,down){ pen.style.left=x+'px'; pen.style.top=y+'px';
+  if(diam){ pen.style.width=pen.style.height=Math.max(12,diam)+'px'; }
+  pen.classList.add('show'); pen.classList.toggle('down', !!down); }
+
+// pointer / touch fallback also writes to the mask
+let pDown=false, pLast=null, pMid=null;
+function ptPos(e){ const r=fog.getBoundingClientRect();
+  return [ (e.touches?e.touches[0].clientX:e.clientX)-r.left, (e.touches?e.touches[0].clientY:e.clientY)-r.top ]; }
+fog.addEventListener('pointerdown',e=>{ pDown=true; pLast=ptPos(e); pMid=pLast; const w=+brush.value; maskDot(pLast[0],pLast[1],w*0.5); showPen(pLast[0],pLast[1],w,true); });
+fog.addEventListener('pointermove',e=>{ if(!pDown)return; const p=ptPos(e); const mid=[(pLast[0]+p[0])/2,(pLast[1]+p[1])/2];
+  const w=+brush.value; maskCurve(pMid,pLast,mid,w); pMid=mid; pLast=p; showPen(p[0],p[1],w,true); });
+window.addEventListener('pointerup',()=>{pDown=false;pLast=null;pMid=null;});
+
+// Fog it up -> blank, fully misted glass to write on (clears any old strokes)
+fogBtn.addEventListener('click',()=>{ fogDensity=0.9; mctx.clearRect(0,0,mask.width,mask.height); });
+// Wipe clean -> clear the whole glass (fill the wipe mask so all fog is carved away)
+clearBtn.addEventListener('click',()=>{ mctx.globalCompositeOperation='source-over'; mctx.fillStyle='#fff'; mctx.fillRect(0,0,mask.width,mask.height); });
+startBtn.addEventListener('click', start);
+</script>
+</body>
+</html>
