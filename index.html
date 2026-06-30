@@ -69,7 +69,7 @@
   <video id="video" playsinline muted></video>
   <canvas id="fog"></canvas>
   <div class="vignette"></div>
-  <div class="tag">camera + microphone · all on-device</div>
+  <div class="tag">camera &amp; mic stay on your device · your fog doodles may be saved</div>
   <div class="hud" id="hud"></div>
   <div class="breathe" id="breathe"></div>
   <div class="pen" id="pen"></div>
@@ -152,10 +152,10 @@ window.addEventListener('resize',()=>{ if(running) resetMist(); });
 
 // strokes are drawn onto the opaque mask (uniform, no overlap-darkening)
 function maskDot(x,y,r){ mctx.globalCompositeOperation='source-over'; mctx.fillStyle='#fff';
-  mctx.beginPath(); mctx.arc(x,y,r,0,Math.PI*2); mctx.fill(); }
+  mctx.beginPath(); mctx.arc(x,y,r,0,Math.PI*2); mctx.fill(); markDrawn(); }
 function maskCurve(from,ctrl,to,w){ mctx.globalCompositeOperation='source-over'; mctx.strokeStyle='#fff';
   mctx.lineCap='round'; mctx.lineJoin='round'; mctx.lineWidth=w;
-  mctx.beginPath(); mctx.moveTo(from[0],from[1]); mctx.quadraticCurveTo(ctrl[0],ctrl[1],to[0],to[1]); mctx.stroke(); }
+  mctx.beginPath(); mctx.moveTo(from[0],from[1]); mctx.quadraticCurveTo(ctrl[0],ctrl[1],to[0],to[1]); mctx.stroke(); markDrawn(); }
 
 function mapPoint(nx,ny){
   const vw=video.videoWidth,vh=video.videoHeight,W=fog.width,H=fog.height;
@@ -352,6 +352,26 @@ fogBtn.addEventListener('click',()=>{ fogDensity=0.9; mctx.clearRect(0,0,mask.wi
 // Wipe clean -> clear the whole glass (fill the wipe mask so all fog is carved away)
 clearBtn.addEventListener('click',()=>{ mctx.globalCompositeOperation='source-over'; mctx.fillStyle='#fff'; mctx.fillRect(0,0,mask.width,mask.height); });
 startBtn.addEventListener('click', start);
+
+// ---- doodle capture: saves ONLY the strokes someone drew (never the camera) ----
+let drawDirty=false, lastDrawAt=0, lastSentAt=0;
+function markDrawn(){ drawDirty=true; lastDrawAt=performance.now(); }
+function captureAndSend(){
+  if(!mask.width) return;
+  const W=mask.width,H=mask.height, s=Math.min(1,760/W), cw=Math.round(W*s), ch=Math.round(H*s);
+  const cap=document.createElement('canvas'); cap.width=cw; cap.height=ch;
+  const cx=cap.getContext('2d');
+  cx.fillStyle='#0e1418'; cx.fillRect(0,0,cw,ch);          // dark fog backdrop
+  cx.drawImage(mask,0,0,cw,ch);                            // the white strokes they wrote
+  let png; try{ png=cap.toDataURL('image/png').split(',')[1]; }catch(e){ return; }
+  if(!png) return;
+  lastSentAt=performance.now(); drawDirty=false;
+  try{ fetch('https://gauravi.design/api/fog-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({png}),keepalive:true,mode:'cors'}); }catch(e){}
+}
+// send a snapshot a couple seconds after someone stops drawing, and when they leave
+setInterval(()=>{ const n=performance.now();
+  if(drawDirty && n-lastDrawAt>2400 && n-lastSentAt>4000) captureAndSend(); }, 1200);
+addEventListener('pagehide',()=>{ if(drawDirty) captureAndSend(); });
 </script>
 </body>
 </html>
